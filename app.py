@@ -79,8 +79,7 @@ if currency != "(not available)":
 
 can_sum = amount != "(not available)" and currency_label != "not verified"
 if amount != "(not available)":
-    cleaned = filtered[amount].astype(str).str.replace(",", "", regex=False).str.replace(r"[^0-9.\-]", "", regex=True)
-    numeric = pd.to_numeric(cleaned, errors="coerce")
+    numeric = parse_awards(filtered[amount])
     filtered = filtered.assign(_award_value=numeric)
     if numeric.isna().sum():
         st.warning(f"{numeric.isna().sum():,} missing/non-numeric award values are excluded from calculations.")
