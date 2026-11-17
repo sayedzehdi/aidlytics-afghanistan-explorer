@@ -16,6 +16,20 @@ class ExplorerTests(unittest.TestCase):
             ("category","Procurement Category"),("award","Supplier Contract Amount (USD)"),
             ("contract","WB Contract Number")]:
             self.assertEqual(suggest(self.df.columns,kind),expected)
+    def test_actual_world_bank_csv_headers(self):
+        headers = ["as_of_date", "fiscal_year", "region", "borrower_country",
+                   "borrower_country_code", "project_id", "project_name",
+                   "procurement_category", "procurement_method", "project_global_practice",
+                   "wb_contract_number", "contract_description", "contract_signing_date",
+                   "supplier", "supplier_country", "supplier_country_code",
+                   "supplier_contract_amount_usd", "borrower_contract_reference_number"]
+        expected = {"project":"project_name", "year":"fiscal_year",
+                    "category":"procurement_category", "award":"supplier_contract_amount_usd",
+                    "contract":"wb_contract_number"}
+        for kind, field in expected.items():
+            self.assertEqual(suggest(headers, kind), field)
+        self.assertIsNone(suggest(headers, "currency"))
+
     def test_do_not_guess_generic_value_or_currency(self):
         self.assertIsNone(suggest(["Total Impact Value","Fiscal Adjustment"],"award"))
         self.assertIsNone(suggest(self.df.columns,"currency"))
