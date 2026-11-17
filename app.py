@@ -1,33 +1,79 @@
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import requests
 from analytics import suggest, parse_awards, quality_report
 
 SOURCE = "https://financesone.worldbank.org/contract-awards-in-investment-project-financing-afghanistan-projects/DS01061"
 st.set_page_config(page_title="Aidlytics | Afghanistan Development Investment Explorer", page_icon="🌍", layout="wide")
 st.title("Afghanistan Development Investment Explorer")
 st.caption("World Bank Investment Project Financing • Public contract-award records • Prototype")
-st.info("Upload an official World Bank CSV or Excel export. No data are bundled and no missing values are estimated.")
+st.info("Loads the public World Bank dataset automatically. You can also select manual CSV / Excel upload in the sidebar. Missing financial values are never estimated.")
 st.markdown(f"[World Bank dataset and documentation]({SOURCE})")
 
-uploaded = st.file_uploader("Upload public procurement dataset", type=["csv", "xlsx", "xls"])
-if uploaded is None:
-    st.subheader("Getting started")
-    st.write("Download the original data from the World Bank link, upload it here, and verify the field mappings before analysing the results.")
-    st.stop()
-
-try:
-    if uploaded.name.lower().endswith(".csv"):
-        try:
-            df = pd.read_csv(uploaded)
-        except UnicodeDecodeError:
-            uploaded.seek(0)
-            df = pd.read_csv(uploaded, encoding="latin-1")
+WORLD_BANK_API = "https://datacatalogapi.worldbank.org/dexapps/fone/api/view"
+@st.cache_data(ttl=86400, show_spinner=False)
+def fetch_world_bank_data():
+    rows = []
+    limit = 1000
+    for skip in range(0, 100000, limit):
+        response = requests.get(WORLD_BANK_API, params={
+            "viewId": "DS01061", "type": "json", "top": limit, "skip": skip
+        }, timeout=35)
+        response.raise_for_status()
+        payload = response.json()
+        page = payload.get("data") if isinstance(payload, dict) else payload
+        if not isinstance(page, list):
+            raise ValueError("World Bank API returned an unexpected format.")
+        rows.extend(page)
+        if len(page) < limit:
+            expected = payload.get("count") if isinstance(payload, dict) else None
+            if expected is not None and len(rows) < int(expected):
+                raise ValueError(f"Incomplete API response: received {len(rows)} of {expected} records.")
+            break
     else:
-        df = pd.read_excel(uploaded)
-except Exception as exc:
-    st.error(f"Could not read this file: {exc}")
-    st.stop()
+        raise ValueError("API pagination exceeded the expected record limit.")
+    result = pd.DataFrame(rows)
+    if result.empty or "supplier_contract_amount_usd" not in result.columns:
+        raise ValueError("No usable World Bank records were returned.")
+    return result
+
+with st.sidebar:
+    st.subheader("Data source")
+    source_mode = st.radio("Choose source", ["World Bank live API", "Upload CSV / Excel"], index=0)
+    st.caption("Automatic source updates are cached for 24 hours. Data is subject to the World Bank's published revisions.")
+
+df = None
+if source_mode == "World Bank live API":
+    try:
+        with st.spinner("Loading public records from the World Bank..."):
+            df = fetch_world_bank_data()
+        st.success(f"Loaded {len(df):,} World Bank records automatically.")
+        if "as_of_date" in df.columns:
+            dates = pd.to_datetime(df["as_of_date"], errors="coerce").dropna()
+            if not dates.empty:
+                st.caption("World Bank data as of " + str(dates.max().date()))
+    except Exception as exc:
+        st.error("World Bank data could not be loaded automatically. Choose 'Upload CSV / Excel' in the sidebar to use a public downloaded copy.")
+        st.caption(f"Technical detail: {exc}")
+        st.stop()
+else:
+    uploaded = st.file_uploader("Upload public procurement dataset", type=["csv", "xlsx", "xls"])
+    if uploaded is None:
+        st.info("Select a public CSV or Excel export from the official World Bank dataset.")
+        st.stop()
+    try:
+        if uploaded.name.lower().endswith(".csv"):
+            try:
+                df = pd.read_csv(uploaded)
+            except UnicodeDecodeError:
+                uploaded.seek(0)
+                df = pd.read_csv(uploaded, encoding="latin-1")
+        else:
+            df = pd.read_excel(uploaded)
+    except Exception as exc:
+        st.error(f"Could not read this file: {exc}")
+        st.stop()
 
 if df.empty:
     st.warning("The uploaded file contains no rows.")
