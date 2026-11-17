@@ -1,6 +1,7 @@
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+from analytics import suggest, parse_awards, quality_report
 
 SOURCE = "https://financesone.worldbank.org/contract-awards-in-investment-project-financing-afghanistan-projects/DS01061"
 st.set_page_config(page_title="Aidlytics | Afghanistan Development Investment Explorer", page_icon="🌍", layout="wide")
@@ -36,22 +37,22 @@ df.columns = [str(c).strip() for c in df.columns]
 fields = list(df.columns)
 choices = ["(not available)"] + fields
 
-def choose_field(label, suggestions):
-    match = next((c for s in suggestions for c in fields if s in c.lower()), None)
+def choose_field(label, kind):
+    match = suggest(fields, kind)
     return st.selectbox(label, choices, index=choices.index(match) if match else 0)
 
 st.subheader("Verify field mappings")
 st.caption("Field names differ between exports. Please review all suggested mappings.")
 a, b, c = st.columns(3)
 with a:
-    project = choose_field("Project", ["project name", "project title", "project id", "project"])
-    year = choose_field("Fiscal year", ["fiscal year", "fiscal_year", "fy", "year"])
+    project = choose_field("Project", "project")
+    year = choose_field("Fiscal year", "year")
 with b:
-    sector = choose_field("Sector / category", ["project global practice", "procurement category", "sector", "category"])
-    amount = choose_field("Supplier contract award value", ["supplier contract amount (usd)", "supplier_contract_amount_usd", "contract amount", "contract value", "award amount", "amount"])
+    sector = choose_field("Sector / category", "category")
+    amount = choose_field("Supplier contract award value", "award")
 with c:
-    contract = choose_field("Contract number / identifier", ["wb contract number", "wb_contract_number", "contract id", "contract number", "contract reference"])
-    currency = choose_field("Currency (optional for USD-labelled fields)", ["currency", "curr"])
+    contract = choose_field("Contract number / identifier", "contract")
+    currency = choose_field("Currency (optional for USD-labelled fields)", "currency")
 
 filtered = df.copy()
 st.subheader("Filters")
@@ -110,6 +111,16 @@ if can_sum and not filtered.empty:
         fig.update_layout(yaxis={"categoryorder": "total ascending"} if field != year else {},
                           height=max(360, min(850, len(grouped) * 28)))
         st.plotly_chart(fig, use_container_width=True)
+st.subheader("Data-quality summary")
+report = quality_report(filtered.drop(columns=["_award_value"], errors="ignore"), amount if amount != "(not available)" else None, contract if contract != "(not available)" else None)
+q1, q2, q3 = st.columns(3)
+q1.metric("Repeated contract IDs", f'{report.get("duplicate_contract_identifiers", 0):,}')
+q2.metric("Missing or invalid award values", f'{report.get("missing_or_invalid_amounts", 0):,}')
+q3.metric("Exact duplicate rows", f'{report["exact_duplicate_rows"]:,}')
+if report.get("negative_amounts", 0):
+    st.warning(f'{report["negative_amounts"]:,} negative award values need review before interpretation.')
+if report["exact_duplicate_rows"]:
+    st.warning("Exact duplicate source rows detected. They have not been removed automatically.")
 st.subheader("Filtered source records")
 st.dataframe(filtered.drop(columns=["_award_value"], errors="ignore"), use_container_width=True)
 st.download_button("Download filtered records (CSV)", filtered.drop(columns=["_award_value"], errors="ignore").to_csv(index=False).encode("utf-8-sig"), file_name="aidlytics_filtered_awards.csv", mime="text/csv")
