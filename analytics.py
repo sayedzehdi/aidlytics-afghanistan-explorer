@@ -11,16 +11,20 @@ ALIASES = {
  "currency": ["currency"]
 }
 def suggest(columns, kind):
-    """Prefer exact case-insensitive aliases; only match longer aliases as substrings."""
+    """Match World Bank snake_case and display labels consistently; prefer exact aliases."""
     columns = list(columns)
-    lower = {str(c).strip().casefold(): c for c in columns}
+    def normalize(value):
+        return re.sub(r"[^a-z0-9]+", " ", str(value).lower()).strip()
+    by_normalized = {normalize(c): c for c in columns}
     for alias in ALIASES[kind]:
-        if alias in lower:
-            return lower[alias]
+        hit = by_normalized.get(normalize(alias))
+        if hit is not None:
+            return hit
     for alias in ALIASES[kind]:
-        if len(alias) >= 7:
+        normalized_alias = normalize(alias)
+        if len(normalized_alias) >= 7:
             for c in columns:
-                if alias in str(c).casefold():
+                if normalized_alias in normalize(c):
                     return c
     return None
 
